@@ -10,7 +10,7 @@ from configuracion import CONFIGURACION
 LOG = logging.getLogger("PythonLogger")
 import maxbotix
 import adc
-from moduls.registros import guardarRegistro
+from modules.registros import guardarRegistro
 
 def abrir_puerto(ruta, baudios):
     import serial

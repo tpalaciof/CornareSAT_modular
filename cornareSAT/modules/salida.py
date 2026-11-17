@@ -9,8 +9,8 @@ from interpretarTramasXbee import contextoNodo
 from configuracion import CONFIGURACION
 LOG = logging.getLogger("PythonLogger")
 import csvwritingv2 as csvwriting
-from moduls.registros import obtenerPendiente
-from moduls.medicion_nivel import formatearTramaNivel
+from modules.registros import obtenerPendiente
+from modules.medicion_nivel import formatearTramaNivel
 
 def formatearMedicion(registro):
     datos = registro['datos']['trama_json'] if registro['tipo'] == 'xbee' else registro['datos']

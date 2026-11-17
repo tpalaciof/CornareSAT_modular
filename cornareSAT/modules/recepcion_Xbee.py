@@ -4,8 +4,8 @@ import interpretarTramasXbee
 from interpretarTramasXbee import contextoNodo, CODIGOS_LOG_XBEE
 from configuracion import CONFIGURACION
 LOG = logging.getLogger("PythonLogger")
-from moduls.medicion_nivel import agregarLecturaXBee, cerrarIntervaloXBee
-from moduls.medicion_lluvia import validarTramaLluvia
+from modules.medicion_nivel import agregarLecturaXBee, cerrarIntervaloXBee
+from modules.medicion_lluvia import validarTramaLluvia
 
 def distribuirLectura(acumulador, registro, colas):
     trama = registro['datos']['trama_json']

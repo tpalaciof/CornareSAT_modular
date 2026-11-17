@@ -12,11 +12,11 @@ import loggingTelegraf as lt
 from configuracion import CONFIGURACION, settings
 LOG = logging.getLogger("PythonLogger")
 from configuracion import cargar
-from moduls.registros import crearColas
-from moduls.medicion_nivel import tarea_sensor
-from moduls.medicion_lluvia import tarea_lluvia
-from moduls.recepcion_Xbee import tarea_xbee
-from moduls.salida import tarea_salida
+from modules.registros import crearColas
+from modules.medicion_nivel import tarea_sensor
+from modules.medicion_lluvia import tarea_lluvia
+from modules.recepcion_Xbee import tarea_xbee
+from modules.salida import tarea_salida
 
 from tunel import iniciarTunel
 

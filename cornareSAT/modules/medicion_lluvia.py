@@ -4,7 +4,7 @@ import math
 import re
 from configuracion import CONFIGURACION
 LOG = logging.getLogger("PythonLogger")
-from moduls.registros import guardarRegistro
+from modules.registros import guardarRegistro
 
 def validarTramaLluvia(trama):
     if not isinstance(trama, dict) or set(trama) != {'precipitacion', 'codigo'}:
