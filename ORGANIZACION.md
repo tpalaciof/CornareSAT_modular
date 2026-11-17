@@ -1,9 +1,7 @@
 # Organización de cornareSAT
 
 El programa de medición tiene una única entrada: `main.py`.
-El código ya no consulta, habilita ni inicia `rain.service`. La configuración
-externa de servicios, crontab y energía se revisará por separado antes de desplegar.
-No se han modificado servicios de una Raspberry real.
+El código ya no consulta, habilita ni inicia `rain.service`. 
 
 ## Responsabilidades
 
