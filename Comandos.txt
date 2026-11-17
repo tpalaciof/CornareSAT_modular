@@ -1,0 +1,43 @@
+# ------------------------------------------------------------COMANDOS------------------------------------------------------#
+
+
+########### Conexión por datos y PuTTY por cable ethernet ###########
+
+# En la Raspberry, desde PuTTY. Escribe la clave cuando se solicite.
+
+sudo nmcli --ask device wifi connect "Tomas" ifname wlan0
+
+ip -4 route show default dev wlan0
+ip -4 route get 1.1.1.1
+
+# Solo si hay una ruta default por wlan0 y la salida sigue por eth0 vía 192.168.137.1.
+
+sudo ip -4 route del default via 192.168.137.1 dev eth0
+
+# Debe mostrar dev wlan0 y HTTP 200, respectivamente.
+ip -4 route get 1.1.1.1
+curl -4 -I --max-time 10 https://pypi.org/simple/adafruit-blinka/
+
+
+########### Reinicia los servicios ###########
+
+sudo systemctl restart monitoring.service
+sudo systemctl restart main.service
+
+
+########### Detener los servicios ###########
+
+sudo systemctl stop main.service monitoring.service
+
+
+########### Activar los servicios ###########
+
+sudo systemctl start main.service monitoring.service
+systemctl is-active main.service monitoring.service
+
+
+########### Muestra qué se desconecta de los puertos ###########
+
+udevadm monitor --udev --subsystem-match=tty
+
+ls -l /dev/serial/by-id/ /dev/ttyUSB* /dev/rain
