@@ -88,14 +88,12 @@ def tarea_sensor_analogico(detener, colas):
         while not detener.is_set():
             ahora = time.monotonic()
             if ahora >= proximo_envio:
-                valores = {'estado': 0 if moda is not None else 2,
-                           'nivel': moda if moda is not None else CONFIGURACION['valor_error_nivel'],
-                           'sensor_conectado': entrada is not None}
                 if moda is not None:
-                    guardarRegistro(colas, 'local', 'raspberry', valores)
+                    guardarRegistro(colas, 'local', 'raspberry', {'nivel': moda})
                 else:
                     LOG.warning("No se están recibiendo lecturas válidas del sensor analógico durante el intervalo; no se publica una medición.")
-                LOG.info('LOCAL moda del intervalo analógico: nivel=%s', valores['nivel'])
+                LOG.info('LOCAL moda del intervalo analógico: nivel=%s',
+                         moda if moda is not None else CONFIGURACION['valor_error_nivel'])
                 frecuencias.clear()
                 moda = None
                 proximo_envio = sampling_time.avanzar_intervalo(

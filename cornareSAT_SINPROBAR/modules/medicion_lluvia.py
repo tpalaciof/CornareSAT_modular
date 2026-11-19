@@ -7,7 +7,7 @@ from modules.registros import guardarRegistro
 
 def leerLluvia():
     from rain_rg15v2 import RG15Sensor
-    sensor = RG15Sensor(port=CONFIGURACION['sensor_lluvia'], enable_xtb=False)
+    sensor = RG15Sensor(port=CONFIGURACION['sensor_lluvia'])
     try:
         if sensor.connect():
             datos = sensor.read_sensor()

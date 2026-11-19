@@ -1,6 +1,6 @@
 import serial
 import time
-from typing import Tuple, Optional, Dict
+from typing import Optional, Dict
 import logging
 import re
 
@@ -18,7 +18,6 @@ class RG15Sensor:
         timeout: float = 1.0,
         max_retries: int = 3,
         retry_delay: float = 0.5,
-        enable_xtb: bool = False,
     ):
         """
         Inicializa el sensor RG-15 con configuraciones extendidas.
@@ -29,14 +28,12 @@ class RG15Sensor:
             timeout: Tiempo de espera para lectura
             max_retries: Número máximo de intentos de lectura
             retry_delay: Tiempo entre reintentos
-            enable_xtb: Habilita la lectura de External Tipping Bucket
         """
         self.port = port
         self.baud_rate = baud_rate
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.enable_xtb = enable_xtb
         self.ser = None
 
     def connect(self) -> bool:
@@ -55,14 +52,9 @@ class RG15Sensor:
             # Configuración inicial
             self.flush_buffer()
             
-            # Habilitar/deshabilitar XTB
-            if self.enable_xtb:
-                self._send_command('X')
-                logging.info("XTB habilitado")
-            else:
-                self._send_command('Y')
-                logging.info("XTB deshabilitado")
-            
+            self._send_command('Y')
+            logging.info("XTB deshabilitado")
+
             self._send_command('P')
             logging.info("Modo polling activado")
             
@@ -101,11 +93,11 @@ class RG15Sensor:
         data = {}
         try:
             # Eliminar 'iph' del final y dividir por líneas
-            lines = response.rstrip().strip("mmph,").split('\n')
-            cleaned_line = re.sub(r"(mmph|mm)", "", lines[0])
+            first_line = response.rstrip().strip("mmph,").partition('\n')[0]
+            cleaned_line = re.sub(r"(mmph|mm)", "", first_line)
             #print(cleaned_line)
             # Verificar que haya al menos una línea
-            if not lines:
+            if not first_line:
                 logging.warning("Respuesta vacía o malformada")
                 return {}
 
@@ -118,21 +110,8 @@ class RG15Sensor:
                 #print(main_data[3].replace(" RInt ", ""))
                 data['rint'] = self._convert_to_float(main_data[3].replace(" RInt ", ""))
             else:
-                logging.warning(f"Datos principales incompletos: {lines[0]}")
+                logging.warning(f"Datos principales incompletos: {first_line}")
 
-            # Procesar la segunda línea si existe (datos XTB)
-            if len(lines) > 1 and self.enable_xtb:
-                
-                #print(xtb_data)
-                if len(main_data) > 4:
-                    
-                    data['xtb_tips'] = self._convert_to_int(main_data[4].replace(" XTBTips: ", ""))
-                    data['xtb_event'] = self._convert_to_float(main_data[5].replace(" XTBEventAcc:  ", "").replace(" mm", ""))
-                    data['xtb_total'] = self._convert_to_float(main_data[6].replace(" XTBTotalAcc:  ", "").replace(" mm", ""))
-                    data['xtb_int'] = self._convert_to_float(main_data[7].replace(" XTBInt:  ", "").replace(" mmph", ""))
-                else:
-                    logging.warning(f"Datos XTB incompletos: {main_data[:4]}")
-                
             return data
         except (ValueError, IndexError) as e:
             logging.error(f"Error al parsear respuesta: {e}")
@@ -149,14 +128,6 @@ class RG15Sensor:
         except ValueError:
             logging.warning(f"No se pudo convertir el valor a flotante: {value}")
             return -999.9  # O devolver un valor predeterminado como 0.0
-
-    def _convert_to_int(self, value: str) -> int:
-        """Convierte una cadena a entero."""
-        try:
-            return int(value.strip().replace(',', ''))
-        except ValueError:
-            logging.warning(f"No se pudo convertir el valor a entero: {value}")
-            return 0
 
     def read_sensor(self) -> Optional[Dict]:
         """
@@ -214,21 +185,13 @@ class RG15Sensor:
             self.ser.close()
             logging.info("Conexión cerrada")
 
-    def __enter__(self):
-        """Soporte para uso con 'with'."""
-        self.connect()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Cierra la conexión al salir del contexto."""
-        self.disconnect()
 
 # Ejemplo de uso
 
 if __name__ == "__main__":
 
     # Inicialización del sensor sin modo continuo
-    sensor = RG15Sensor(enable_xtb=False)
+    sensor = RG15Sensor()
 
     # Conectar el sensor manualmente
     if sensor.connect():
