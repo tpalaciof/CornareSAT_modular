@@ -15,7 +15,6 @@ from configuracion import cargar
 from modules.registros import crearColas
 from modules.medicion_nivel import tarea_sensor
 from modules.medicion_lluvia import tarea_lluvia
-from modules.recepcion_Xbee import tarea_xbee
 from modules.salida import tarea_salida
 
 from tunel import iniciarTunel
@@ -23,13 +22,16 @@ from tunel import iniciarTunel
 
 def main():
     cargar()
+    puertos = []
+    if CONFIGURACION['H_XBEE']:
+        puertos.append(CONFIGURACION['xbee'])
     if CONFIGURACION['H_RAIN']:
-        puertos = [CONFIGURACION['xbee'], CONFIGURACION['sensor_lluvia']]
-        if CONFIGURACION['nivel_local'] and CONFIGURACION['H_LEVEL']:
-            puertos.append(CONFIGURACION['sensor'])
-        if len(set(map(os.path.realpath, puertos))) != len(puertos):
-            LOG.error('Los sensores y XBee requieren puertos distintos.')
-            return 1
+        puertos.append(CONFIGURACION['sensor_lluvia'])
+    if CONFIGURACION['nivel_local'] and CONFIGURACION['H_LEVEL']:
+        puertos.append(CONFIGURACION['sensor'])
+    if len(set(map(os.path.realpath, puertos))) != len(puertos):
+        LOG.error('Los dispositivos seriales activos requieren puertos distintos.')
+        return 1
     lt.configurar(ajustes=settings)
     # Config logs
     LOG.setLevel(logging.INFO)
@@ -46,20 +48,17 @@ def main():
     except OSError as error:
         LOG.warning('No se pudo abrir el registro de Telegraf %s: %s', CONFIGURACION['log_file'], error)
 
-    if CONFIGURACION['nivel_local'] and CONFIGURACION['H_LEVEL'] and (
-            os.path.realpath(CONFIGURACION['sensor']) == os.path.realpath(CONFIGURACION['xbee'])):
-        LOG.error('Sensor y XBee requieren puertos seriales diferentes')
-        return 1
     if CONFIGURACION['nivel_local'] and not CONFIGURACION['H_LEVEL']:
         calibracion = CONFIGURACION['calibracion']
         if not all(math.isfinite(v) for v in calibracion) or calibracion[0] == calibracion[1]:
             LOG.error('Calibración ADC no válida')
             return 1
-    try:
-        import serial  # noqa: F401
-    except ImportError:
-        LOG.error("Falta pyserial. Instalar en el entorno: python -m pip install pyserial==3.5")
-        return 1
+    if puertos:
+        try:
+            import serial  # noqa: F401
+        except ImportError:
+            LOG.error("Falta pyserial. Instalar en el entorno: python -m pip install pyserial==3.5")
+            return 1
 
     CONFIGURACION['carpeta_csv'].mkdir(parents=True, exist_ok=True)
     # Impide dos instancias ejecutando este mismo programa.
@@ -86,13 +85,17 @@ def main():
         hiloSensor = None
         if CONFIGURACION['nivel_local']:
             hiloSensor = threading.Thread(target=tarea_sensor, args=(detener, colas), daemon=True)
-        hiloXBee = threading.Thread(target=tarea_xbee, args=(detener, colas), daemon=True)
+        hiloXBee = None
+        if CONFIGURACION['H_XBEE']:
+            from modules.recepcion_Xbee import tarea_xbee
+            hiloXBee = threading.Thread(target=tarea_xbee, args=(detener, colas), daemon=True)
         hiloSalida = threading.Thread(target=tarea_salida, args=(finalizarSalida, colas), daemon=True)
         if CONFIGURACION['nivel_local']:
             LOG.info('Inicio de nivel: sensor=%s, código=%s, intervalo=%s s',
                      'TTL' if CONFIGURACION['H_LEVEL'] else 'ADS1015 analógico', CONFIGURACION['codigo'], CONFIGURACION['intervalo'])
         else:
-            LOG.info('Nivel local desactivado; recepción XBee habilitada.')
+            LOG.info('Nivel local desactivado.')
+        LOG.info('Recepción XBee %s.', 'habilitada' if hiloXBee is not None else 'desactivada')
         hiloLluvia = None
         if CONFIGURACION['H_RAIN']:
             hiloLluvia = threading.Thread(target=tarea_lluvia, args=(detener, colas), daemon=True)
@@ -102,9 +105,11 @@ def main():
             hiloSalida.start()
             if hiloSensor:
                 hiloSensor.start()
-            hiloXBee.start()
+            if hiloXBee is not None:
+                hiloXBee.start()
             while not detener.wait(0.5):
-                if (hiloSensor is not None and not hiloSensor.is_alive()) or not hiloXBee.is_alive() or not hiloSalida.is_alive() or (hiloLluvia and not hiloLluvia.is_alive()):
+                if any(hilo is not None and not hilo.is_alive()
+                       for hilo in (hiloSensor, hiloXBee, hiloSalida, hiloLluvia)):
                     LOG.error('Una tarea terminó inesperadamente. Se detiene el programa.')
                     resultado = 1
                     break
@@ -113,9 +118,9 @@ def main():
             # Primero terminan las lecturas; después se vacían las colas al CSV.
             if hiloSensor is not None and hiloSensor.ident is not None:
                 hiloSensor.join(timeout=6.0)
-            if hiloXBee.ident is not None:
+            if hiloXBee is not None and hiloXBee.ident is not None:
                 hiloXBee.join(timeout=6.0)
-            if (hiloSensor is not None and hiloSensor.is_alive()) or hiloXBee.is_alive():
+            if any(hilo is not None and hilo.is_alive() for hilo in (hiloSensor, hiloXBee)):
                 LOG.error('No terminó la lectura del sensor o del XBee.')
                 resultado = 1
             if hiloLluvia and hiloLluvia.ident is not None:

@@ -1,7 +1,25 @@
-import serial
-import time
 import re
 import logging
+import os
+LOG = logging.getLogger("PythonLogger")
+
+
+def abrir_puerto(ruta, baudios):
+    import serial
+    opciones = dict(port=ruta, baudrate=baudios, bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+                    timeout=0.1, write_timeout=0.25)
+    if os.name == "posix":
+        opciones["exclusive"] = True
+    return serial.Serial(**opciones)
+
+
+def cerrar_puerto(puerto):
+    if puerto is not None:
+        try:
+            puerto.close()
+        except OSError:
+            LOG.warning("No se pudo cerrar un puerto", exc_info=True)
 
 
 def decodificar_tramas(datos, buffer):
@@ -24,18 +42,3 @@ def decodificar_tramas(datos, buffer):
 def a_centimetros(distancia_mm):
     # La API original de nivel.py expresa el sensor TTL en centímetros.
     return round(distancia_mm / 10.0, 2)
-
-def measure():
-    try: 
-        with serial.Serial('/dev/maxbotix', 9600, timeout=1) as ser:
-            data = ser.read_until(b'\r')
-        range = data[1:-1] #Don't include the first and last character ('R' and '\r')
-        range = int(range)
-        #print(range*0.1)
-        return a_centimetros(range)
-    except:
-        print("Error decoding value!")
-        return 888.8
-
-#measure()
-        

@@ -125,7 +125,6 @@ Las rutas de esta tabla se expresan desde la carpeta `cornareSAT/`.
 | `utils/maxbotix.py` | Interpretar las lecturas seriales del MaxBotix y convertir las distancias para su uso en el programa. |
 | `utils/adc.py` | Acceder al ADS1015 y convertir las lecturas analógicas según la calibración configurada. |
 | `utils/rain_rg15v2.py` | Gestionar la comunicación con el RG-15, sus comandos y la lectura de sus datos. |
-| `utils/maxbotix_i2c.py` | Proporcionar rutinas auxiliares de lectura de sensores MaxBotix por I²C. |
 | `utils/INA.py` | Obtener mediciones de voltaje y corriente de la batería y del panel mediante sensores INA219. |
 | `utils/modem.py` | Consultar parámetros de señal y red del módem para el monitoreo de la estación. |
 | `utils/speedsd.py` | Medir y guardar la velocidad de escritura de la SD para el monitoreo. |

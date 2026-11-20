@@ -13,21 +13,29 @@ def cargar():
     settings.clear()
     with open(file_settings, 'r') as archivo:
         settings.update(json.load(archivo))
-    if not isinstance(settings.get("LEVEL", True), bool):
+    nivel_local = settings.get("LEVEL", True)
+    xbee_habilitado = settings.get("XBEE", True)
+    if not isinstance(nivel_local, bool):
         raise ValueError("LEVEL debe ser true o false en settings.json")
+    if not isinstance(xbee_habilitado, bool):
+        raise ValueError("XBEE debe ser true o false en settings.json")
     CONFIGURACION.clear()
     CONFIGURACION.update({
-    "nivel_local": settings.get("LEVEL", True),  # Activa o desactiva únicamente el nivel local.
+    "nivel_local": nivel_local,  # Activa o desactiva únicamente el nivel local.
+    "H_XBEE": xbee_habilitado,
     "H_LEVEL": settings['MAXBOTIX_TTL'],
     "H_RAIN": settings['RAIN'],
     "codigo": settings['CODE'],
-    "intervalo": sampling_time.segundos(settings['SAMPLETIME_LEVEL'], 'minutes'),
+    "intervalo": (
+        sampling_time.segundos(settings['SAMPLETIME_LEVEL'], 'minutes')
+        if nivel_local or xbee_habilitado else None
+    ),
     "calibracion": (
         float(settings['MAXBOTIX_ZERO_RAW']),
         float(settings['MAXBOTIX_SPAN_RAW']),
         float(settings['MAXBOTIX_ZERO']),
         float(settings['MAXBOTIX_SPAN']),
-    ) if settings.get('LEVEL', True) else None,
+    ) if nivel_local else None,
 
     # Puerto del adaptador USB donde está conectado el XBee receptor.
     "xbee": "/dev/xbee",

@@ -10,15 +10,40 @@ from configuracion import CONFIGURACION
 LOG = logging.getLogger("PythonLogger")
 import csvwritingv2 as csvwriting
 from modules.registros import obtenerPendiente
-from modules.medicion_nivel import formatearTramaNivel
+
+def formatearTramaNivel(registro):
+    """Las mediciones conservan las tres claves que utiliza nivel.py."""
+    datos = registro['datos']
+    if registro['tipo'] == 'xbee':
+        nivel = datos['trama_json']['nivel']
+        codigo = datos['trama_json']['codigo']
+    else:
+        nivel = datos['nivel']
+        codigo = CONFIGURACION['codigo']
+    # Fecha de recepción: misma referencia horaria que el sensor local.
+    # Los respaldos ya guardados se reenvían conservando su fecha registrada.
+    fecha = datetime.fromtimestamp(registro['ts'] / 1000.0, CONFIGURACION['zona_horaria'])
+    return {'nivel': nivel, 'fecha': fecha.strftime('%Y-%m-%d %H:%M'), 'codigo': codigo}
+
+
+def formatearTramaLluvia(registro):
+    datos = registro['datos']
+    if registro['tipo'] == 'xbee':
+        precipitacion = datos['trama_json']['precipitacion']
+        codigo = datos['trama_json']['codigo']
+    else:
+        precipitacion = datos['precipitacion']
+        codigo = CONFIGURACION['codigo']
+    fecha = datetime.fromtimestamp(registro['ts'] / 1000, CONFIGURACION['zona_horaria'])
+    return {'precipitacion': precipitacion, 'fecha': fecha.strftime('%Y-%m-%d %H:%M'),
+            'codigo': codigo}
+
 
 def formatearMedicion(registro):
     datos = registro['datos']['trama_json'] if registro['tipo'] == 'xbee' else registro['datos']
     if 'precipitacion' not in datos:
         return formatearTramaNivel(registro)
-    fecha = datetime.fromtimestamp(registro['ts'] / 1000, CONFIGURACION['zona_horaria'])
-    return {'precipitacion': datos['precipitacion'], 'fecha': fecha.strftime('%Y-%m-%d %H:%M'),
-            'codigo': datos['codigo'] if registro['tipo'] == 'xbee' else CONFIGURACION['codigo']}
+    return formatearTramaLluvia(registro)
 
 def contextoMedicion(trama):
     codigo = trama.get('codigo') if isinstance(trama, dict) else None
@@ -211,5 +236,6 @@ def tarea_salida(finalizar, colas):
                 cierre = threading.Thread(target=client.loop_stop, daemon=True)
                 cierre.start()
                 cierre.join(timeout=min(0.5, timeout))
+
 
 
