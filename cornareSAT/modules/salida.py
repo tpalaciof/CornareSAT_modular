@@ -99,8 +99,19 @@ def tarea_salida(finalizar, colas):
     client = None
     loopIniciado = False
 
+    carpeta_csv = CONFIGURACION['carpeta_csv']
+    nombresPendientes = {}
+    registroNodos = None
     try:
-        csvwriting.migrarRespaldosAnteriores(CONFIGURACION['carpeta_csv'])
+        registroNodos = csvwriting.cargarRegistroNodos(carpeta_csv)
+    except (OSError, ValueError) as error:
+        logger.warning('No se pudo cargar el registro XBee. Se usará sin_identificar: %s', error)
+    nombresPorMac = registroNodos['nombres'] if registroNodos is not None else None
+    configuracion_csv = {**CONFIGURACION, 'nombres_nodos': nombresPorMac}
+
+    try:
+        if registroNodos is not None:
+            csvwriting.migrarRespaldosAnteriores(carpeta_csv, nombresPorMac)
     except OSError as error:
         logger.warning('No se completó la reubicación de archivos anteriores: %s', error)
 
@@ -151,7 +162,7 @@ def tarea_salida(finalizar, colas):
     Main loop
     '''
     try:
-        while (not finalizar.is_set() or porConfirmar
+        while (not finalizar.is_set() or porConfirmar or nombresPendientes
                or any(not colas[tipo].empty() for tipo in ('local', 'xbee', 'identificacion'))):
             ahora = time.monotonic()
 
@@ -174,24 +185,34 @@ def tarea_salida(finalizar, colas):
                     porConfirmar.remove(envio)
                 elif ahora >= envio['limite'] or client is None or not client.is_connected():
                     if respaldo is None:
-                        csvwriting.guardarRespaldoNivel(CONFIGURACION, registro, trama)
+                        csvwriting.guardarRespaldoNivel(configuracion_csv, registro, trama)
                     proximoReenvio = ahora + reintento
                     porConfirmar.remove(envio)
                     logger.warning("Envío MQTT sin confirmar; el dato queda respaldado.", extra=contextoMedicion(trama))
 
             reenvioEnCurso = any(envio['respaldo'] is not None for envio in porConfirmar)
 
+            # Un reenvío pendiente conserva su ruta hasta resolver la confirmación.
+            if nombresPendientes and not reenvioEnCurso:
+                for mac, ni in nombresPendientes.items():
+                    try:
+                        if csvwriting.registrarNiNodo(carpeta_csv, registroNodos, mac, ni):
+                            logger.info('Nodo XBee %s usa la carpeta %s', mac, ni, extra=contextoNodo(mac))
+                    except (OSError, ValueError) as error:
+                        logger.warning('No se aplicó el NI %r del nodo %s: %s', ni, mac, error,
+                                       extra=contextoNodo(mac))
+                nombresPendientes.clear()
+
             # Procesa una medición nueva.
             registro = obtenerPendiente(colas, dar_turno_remoto=(turno % 4 == 3))
             if registro is not None:
-                turno += 1
                 if registro['tipo'] == 'identificacion':
-                    mac = registro['origen']
-                    logger.info('Nodo XBee %s identificado como %s', mac, registro['datos']['ni'],
-                                extra=contextoNodo(mac))
+                    if registroNodos is not None:
+                        nombresPendientes[registro['origen']] = registro['datos']['ni']
                     continue
+                turno += 1
                 trama = formatearMedicion(registro)
-                csvwriting.guardarHistorico(CONFIGURACION, registro, trama)
+                csvwriting.guardarHistorico(configuracion_csv, registro, trama)
                 # La terminal muestra la recepción sin esperar a DNS ni al PUBACK.
                 if salidaDisponible:
                     try:
@@ -204,9 +225,9 @@ def tarea_salida(finalizar, colas):
                         enviar(trama, registro=registro)
                     except (OSError, ValueError, RuntimeError) as error:
                         logger.warning("No se pudo iniciar el envío MQTT: %s", error, extra=contextoMedicion(trama))
-                        csvwriting.guardarRespaldoNivel(CONFIGURACION, registro, trama)
+                        csvwriting.guardarRespaldoNivel(configuracion_csv, registro, trama)
                 else:
-                    csvwriting.guardarRespaldoNivel(CONFIGURACION, registro, trama)
+                    csvwriting.guardarRespaldoNivel(configuracion_csv, registro, trama)
 
             # Solo un respaldo en vuelo; los datos nuevos conservan su prioridad.
             if (not finalizar.is_set() and client is not None and client.is_connected()
@@ -215,7 +236,7 @@ def tarea_salida(finalizar, colas):
                     and colas['local'].empty() and colas['xbee'].empty()):
                 try:
                     respaldo = None
-                    pendiente = csvwriting.leerPendienteRespaldo(CONFIGURACION['carpeta_csv'])
+                    pendiente = csvwriting.leerPendienteRespaldo(carpeta_csv)
                     if pendiente is not None:
                         trama, respaldo = pendiente
                     else:

@@ -8,6 +8,165 @@ import re
 import uuid
 
 
+REGISTRO_NODOS = 'nodos_xbee.json'
+
+
+def _macValida(mac):
+    return isinstance(mac, str) and re.fullmatch(r'[0-9A-F]{16}', mac) is not None
+
+
+def _niValido(ni):
+    return (isinstance(ni, str) and re.fullmatch(r'[ -~]{1,20}', ni) is not None
+            and ni == ni.strip() and ni not in ('.', '..')
+            and '/' not in ni and '\\' not in ni)
+
+
+def _existeRuta(ruta):
+    return ruta.exists() or ruta.is_symlink()
+
+
+def _directorioNodo(carpeta, mac, nombres):
+    if nombres is not None:
+        ni = nombres.get(mac)
+        if ni is not None:
+            return carpeta / 'nodos' / ni
+        legado = carpeta / 'nodos' / mac
+        if legado.is_dir() and not legado.is_symlink() and mac not in nombres.values():
+            return legado
+    return carpeta / 'sin_identificar' / mac
+
+
+def _sincronizarDirectorio(carpeta):
+    descriptor = os.open(carpeta, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _escribirRegistroNodos(carpeta, estado):
+    ruta = carpeta / REGISTRO_NODOS
+    temporal = carpeta / ('.' + ruta.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        with temporal.open('x', encoding='utf-8') as archivo:
+            json.dump(estado, archivo, indent=2, sort_keys=True)
+            archivo.write('\n')
+            archivo.flush()
+            os.fsync(archivo.fileno())
+        os.replace(temporal, ruta)
+        _sincronizarDirectorio(carpeta)
+    finally:
+        temporal.unlink(missing_ok=True)
+
+
+def _cerrarRenombreNodo(carpeta, estado):
+    cambio = estado['renombre']
+    origen = carpeta / cambio['origen']
+    destino = carpeta / 'nodos' / cambio['ni']
+    nombres = estado['nombres']
+    if not _existeRuta(origen) and destino.is_dir() and not destino.is_symlink():
+        nombres[cambio['mac']] = cambio['ni']
+        _sincronizarDirectorio(destino.parent)
+        if origen.parent != destino.parent and origen.parent.is_dir():
+            _sincronizarDirectorio(origen.parent)
+    _escribirRegistroNodos(carpeta, {'nombres': nombres})
+    del estado['renombre']
+
+
+def cargarRegistroNodos(carpeta):
+    carpeta = Path(carpeta)
+    try:
+        with (carpeta / REGISTRO_NODOS).open(encoding='utf-8') as archivo:
+            estado = json.load(archivo)
+    except FileNotFoundError:
+        return {'nombres': {}}
+
+    nombres = estado.get('nombres') if isinstance(estado, dict) else None
+    if (not isinstance(nombres, dict)
+            or any(not _macValida(mac) or not _niValido(ni) for mac, ni in nombres.items())
+            or len(nombres) != len(set(nombres.values()))):
+        raise ValueError('Registro de MAC y NI inválido')
+
+    cambio = estado.get('renombre')
+    if cambio is not None:
+        if not isinstance(cambio, dict):
+            raise ValueError('Renombrado de nodo inválido')
+        mac, ni = cambio.get('mac'), cambio.get('ni')
+        if not _macValida(mac) or not _niValido(ni) or ni in nombres.values():
+            raise ValueError('Renombrado de nodo inválido')
+        origenes = {f'sin_identificar/{mac}', 'nodos/' + nombres.get(mac, mac)}
+        if not isinstance(cambio.get('origen'), str) or cambio['origen'] not in origenes:
+            raise ValueError('Carpeta de origen del renombrado inválida')
+        try:
+            _cerrarRenombreNodo(carpeta, estado)
+        except OSError as error:
+            logging.getLogger('PythonLogger').warning(
+                'Se completará el registro del renombrado al volver a consultar el NI: %s', error)
+    return estado
+
+
+def _moverSinReemplazar(ruta, destino, nombre):
+    nueva = destino / nombre
+    numero = 2
+    while _existeRuta(nueva):
+        nueva = destino / (Path(nombre).stem + f'_{numero}.csv')
+        numero += 1
+    ruta.rename(nueva)
+
+
+def _reubicarCsvDelNodo(carpeta, mac, nombres):
+    destino = carpeta / 'nodos' / nombres[mac]
+    origenes = [carpeta / 'sin_identificar' / mac]
+    if mac not in nombres.values():
+        origenes.append(carpeta / 'nodos' / mac)
+    for origen in origenes:
+        if not origen.is_dir() or origen.is_symlink():
+            continue
+        for ruta in sorted(origen.glob('*.csv')):
+            if ruta.is_file() and not ruta.is_symlink():
+                destino.mkdir(parents=True, exist_ok=True)
+                _moverSinReemplazar(ruta, destino, ruta.name)
+        if not any(origen.iterdir()):
+            origen.rmdir()
+
+
+def registrarNiNodo(carpeta, estado, mac, ni):
+    """Asocia un NI a la MAC y renombra su directorio si ya existe."""
+    if not _macValida(mac) or not _niValido(ni):
+        raise ValueError('MAC o NI inválido como nombre de carpeta')
+    carpeta = Path(carpeta)
+    if estado.get('renombre') is not None:
+        _cerrarRenombreNodo(carpeta, estado)
+    nombres = estado['nombres']
+    if nombres.get(mac) == ni:
+        _reubicarCsvDelNodo(carpeta, mac, nombres)
+        return False
+
+    origen = _directorioNodo(carpeta, mac, nombres)
+    destino = carpeta / 'nodos' / ni
+    if ni in nombres.values() or (destino != origen and _existeRuta(destino)):
+        raise ValueError(f'El nombre {ni!r} ya está en uso')
+    if _existeRuta(origen) and (not origen.is_dir() or origen.is_symlink()):
+        raise OSError(f'El origen no es un directorio de datos: {origen}')
+
+    if destino == origen or not origen.exists():
+        _escribirRegistroNodos(carpeta, {'nombres': {**nombres, mac: ni}})
+        nombres[mac] = ni
+    else:
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        # Persiste la operación para recuperar la relación tras un corte de energía.
+        cambio = {'mac': mac, 'ni': ni, 'origen': origen.relative_to(carpeta).as_posix()}
+        _escribirRegistroNodos(carpeta, {'nombres': nombres, 'renombre': cambio})
+        estado['renombre'] = cambio
+        try:
+            origen.rename(destino)
+        finally:
+            _cerrarRenombreNodo(carpeta, estado)
+
+    _reubicarCsvDelNodo(carpeta, mac, nombres)
+    return True
+
+
 def anexarJson(filename, tramas):
     """Respaldo de nivel: un JSON por línea, sin cabecera, en el CSV diario."""
     lineas = [json.dumps(trama, separators=(',', ':'), allow_nan=False) + '\n'
@@ -76,6 +235,7 @@ def leerPendienteRespaldo(carpeta):
     carpeta = Path(carpeta)
     rutas = list(carpeta.glob('local/pendientes_*.csv'))
     rutas.extend(carpeta.glob('nodos/*/pendientes_*.csv'))
+    rutas.extend(carpeta.glob('sin_identificar/*/pendientes_*.csv'))
     for ruta in sorted(rutas):
         with open(ruta, 'rb') as archivo:
             while True:
@@ -124,11 +284,12 @@ def rutaMedicion(configuracion, registro, trama, pendiente=False):
     carpeta = Path(configuracion['carpeta_csv'])
     directorio = carpeta / 'local'
     if registro['tipo'] == 'xbee':
-        # MAC estable: el histórico no cambia de ruta cuando cambia el NI.
         mac = registro['origen'].upper()
-        if not re.fullmatch(r'[0-9A-F]{16}', mac):
+        if not _macValida(mac):
             raise ValueError('MAC XBee no válida')
         directorio = carpeta / 'nodos' / mac
+        if 'nombres_nodos' in configuracion:
+            directorio = _directorioNodo(carpeta, mac, configuracion['nombres_nodos'])
     prefijo = 'rain' if 'precipitacion' in trama else 'level'
     if pendiente:
         prefijo = 'pendientes_' + prefijo
@@ -149,7 +310,7 @@ def guardarRespaldoNivel(configuracion, registro, trama):
         raise OSError("No se pudo guardar el respaldo: " + str(ruta))
 
 
-def migrarRespaldosAnteriores(carpeta):
+def migrarRespaldosAnteriores(carpeta, nombres_nodos=None):
     """Reubica los JSON de la estructura anterior antes de empezar a enviar."""
     carpeta = Path(carpeta)
     diarios = carpeta / 'diarios'
@@ -159,11 +320,14 @@ def migrarRespaldosAnteriores(carpeta):
     origenes = [(carpeta, local, True), (diarios, local, False)]
     for raiz, pendientes in ((nodos, True), (diarios / 'nodos', False)):
         for origen in sorted(raiz.glob('*')):
+            if raiz == nodos and nombres_nodos is not None and origen.name in nombres_nodos.values():
+                continue
             mac = origen.name.rsplit('_', 1)[-1].upper()
             if pendientes and '_' not in origen.name:
                 continue
-            if re.fullmatch(r'[0-9A-F]{16}', mac) and origen.is_dir() and not origen.is_symlink():
-                origenes.append((origen, nodos / mac, pendientes))
+            if _macValida(mac) and origen.is_dir() and not origen.is_symlink():
+                destino = nodos / mac if nombres_nodos is None else _directorioNodo(carpeta, mac, nombres_nodos)
+                origenes.append((origen, destino, pendientes))
 
     for origen, destino, pendientes in origenes:
         lluvia = 'rain_pending' if pendientes else 'rain'
@@ -186,12 +350,7 @@ def migrarRespaldosAnteriores(carpeta):
                     if pendientes:
                         nombre = 'pendientes_' + nombre
                     destino.mkdir(parents=True, exist_ok=True)
-                    nueva = destino / nombre
-                    numero = 2
-                    while nueva.exists() or nueva.is_symlink():
-                        nueva = destino / (Path(nombre).stem + f'_{numero}.csv')
-                        numero += 1
-                    ruta.rename(nueva)
+                    _moverSinReemplazar(ruta, destino, nombre)
                 except (OSError, ValueError) as error:
                     logger.warning('Se conserva el archivo anterior %s: %s', ruta, error)
 

@@ -4,6 +4,7 @@ import logging
 import time
 
 LOG = logging.getLogger("PythonLogger")
+REVISION_NI_S = 300.0
 
 # Asociaciones conocidas: configuración inicial o JSON válido recibido por radio.
 CODIGOS_LOG_XBEE = {}
@@ -205,12 +206,14 @@ def solicitarNiNodo(configuracion, puerto, mac, estadoNi):
     """
 
     # Si el NI ya se conoce, o todavía no ha pasado el tiempo de reintento_ni_s después del último intento
-    if anterior is not None and (
-        anterior["ni"] is not None or ahora - anterior["ultimo_intento"] < configuracion['reintento_ni_s']
-    ):
-        return
+    # Un NI conocido también se vuelve a consultar, con un intervalo mayor.
+    if anterior is not None:
+        espera = REVISION_NI_S if anterior["ni"] is not None else configuracion['reintento_ni_s']
+        if ahora - anterior["ultimo_intento"] < espera:
+            return
     
     # Si no se encuentra asociado un NI para esa MAC
+    # La misma consulta se utiliza para comprobar si cambió un NI conocido.
     estadoNi["identificador"] = estadoNi["identificador"] % 255 + 1 # Genera un identificador para reconocer la respuesta
     identificador = estadoNi["identificador"]
 
